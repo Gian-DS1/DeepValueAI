@@ -213,7 +213,7 @@ class TestAnalyzeTicker:
 # ---------------------------------------------------------------------------
 
 class TestScanSP500:
-    @patch("core.screener_engine.download_ohlcv")
+    @patch("core.screener_engine.download_ohlcv_batch")
     @patch("core.screener_engine.get_sp500_tickers")
     @patch("core.screener_engine.load_model")
     @patch("core.screener_engine.load_threshold")
@@ -237,7 +237,7 @@ class TestScanSP500:
         assert isinstance(result, pd.DataFrame)
         assert len(result) >= 1
 
-    @patch("core.screener_engine.download_ohlcv")
+    @patch("core.screener_engine.download_ohlcv_batch")
     @patch("core.screener_engine.load_model")
     @patch("core.screener_engine.load_threshold")
     @patch("core.screener_engine.build_feature_row")
@@ -260,7 +260,7 @@ class TestScanSP500:
             probs = result["probability"].tolist()
             assert probs == sorted(probs, reverse=True)
 
-    @patch("core.screener_engine.download_ohlcv")
+    @patch("core.screener_engine.download_ohlcv_batch")
     @patch("core.screener_engine.load_model")
     @patch("core.screener_engine.load_threshold")
     def test_empty_when_no_data(self, mock_threshold, mock_model, mock_download):

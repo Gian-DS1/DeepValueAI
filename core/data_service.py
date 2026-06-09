@@ -302,6 +302,94 @@ def download_ohlcv(
 
     return result
 
+def download_ohlcv_batch(
+    tickers: list[str],
+    period: str = DOWNLOAD_PERIOD,
+    interval: str = DOWNLOAD_INTERVAL,
+) -> dict[str, pd.DataFrame]:
+    """Download OHLCV for many tickers in ONE bulk request (fast path).
+
+    Uses ``yf.download()`` with ``group_by="ticker"`` to fetch all symbols
+    in a single batched HTTP round-trip instead of looping ticker-by-ticker
+    with a sleep between each (which is what ``download_ohlcv`` does). For a
+    full S&P 500 scan this turns hundreds of sequential requests into one,
+    cutting download time from ~15 min to a few minutes.
+
+    Robustness: bulk download can silently drop or partially return tickers
+    when Yahoo hiccups. Any ticker missing or empty after the batch is
+    collected and retried via the per-ticker ``download_ohlcv`` path, so the
+    result is as complete as the slow path but much faster in the common case.
+
+    Parameters
+    ----------
+    tickers : list[str]
+        Ticker symbols to download.
+    period, interval : str
+        Same meaning as in ``download_ohlcv``.
+
+    Returns
+    -------
+    dict[str, pd.DataFrame]
+        Mapping of ticker -> OHLCV DataFrame (``[Open, High, Low, Close,
+        Volume]``). Only tickers with at least one valid row are included.
+    """
+    if not tickers:
+        return {}
+
+    # A single ticker doesn't benefit from batching and yf.download's
+    # column shape differs for one symbol — defer to the simple path.
+    if len(tickers) == 1:
+        return download_ohlcv(tickers, period=period, interval=interval)
+
+    logger.info(
+        "Batch-downloading OHLCV for %d tickers (period=%s, interval=%s)...",
+        len(tickers), period, interval,
+    )
+
+    ohlcv_cols = ["Open", "High", "Low", "Close", "Volume"]
+    result: dict[str, pd.DataFrame] = {}
+
+    try:
+        raw = yf.download(
+            tickers,
+            period=period,
+            interval=interval,
+            group_by="ticker",
+            auto_adjust=True,
+            threads=True,        # yfinance parallelizes the batch internally
+            progress=False,
+        )
+    except Exception as exc:
+        # Whole-batch failure (e.g., network). Fall back entirely.
+        logger.warning("Batch download failed (%s). Falling back to per-ticker.", exc)
+        return download_ohlcv(tickers, period=period, interval=interval)
+
+    # yf.download with multiple tickers returns a column MultiIndex keyed by
+    # ticker. Slice out each ticker's frame, keep OHLCV, drop bad Close rows.
+    for ticker in tickers:
+        try:
+            if ticker not in raw.columns.get_level_values(0):
+                continue
+            df = raw[ticker]
+            if df is None or df.empty:
+                continue
+            keep = [c for c in ohlcv_cols if c in df.columns]
+            df = df[keep].dropna(subset=["Close"]).copy()
+            if not df.empty:
+                result[ticker] = df
+        except Exception as exc:  # noqa: BLE001 - one bad ticker must not kill the batch
+            logger.debug("Could not extract %s from batch: %s", ticker, exc)
+
+    # Retry whatever the batch missed via the robust per-ticker path.
+    missing = [t for t in tickers if t not in result]
+    if missing:
+        logger.info("Batch missed %d tickers; retrying individually.", len(missing))
+        result.update(download_ohlcv(missing, period=period, interval=interval))
+
+    logger.info("Batch download complete: %d / %d tickers.", len(result), len(tickers))
+    return result
+
+
 # ---------------------------------------------------------------------------
 # OHLCV cache — Parquet-based local cache for fast incremental updates
 # ---------------------------------------------------------------------------
@@ -425,9 +513,9 @@ def download_ohlcv_cached(
         len(fresh), len(stale), len(tickers),
     )
 
-    # Download only stale/missing tickers
+    # Download only stale/missing tickers (batch = one bulk request).
     if stale:
-        downloaded = download_ohlcv(stale, period=period, interval=interval)
+        downloaded = download_ohlcv_batch(stale, period=period, interval=interval)
         fresh.update(downloaded)
         # Update cache with new data
         save_ohlcv_cache(downloaded)

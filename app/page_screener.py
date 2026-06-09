@@ -7,9 +7,8 @@ and displays a ranked table of investment opportunities with filters.
 
 import pandas as pd
 import streamlit as st
+from data_cache import cached_scan, clear_caches
 from theme import COLORS, metric_card, metric_row, section_title
-
-from core.screener_engine import scan_sp500
 
 _TEST_TICKERS = ["AAPL", "MSFT", "GOOGL", "AMZN", "META", "NVDA", "JPM", "JNJ", "V", "PG"]
 
@@ -39,12 +38,23 @@ def render():
     with col2:
         show_all = st.checkbox("Include tickers without signal", value=True)
 
-    if st.button("Scan", type="primary"):
-        tickers = _TEST_TICKERS if "Quick" in mode else None
+    col_scan, col_refresh = st.columns([4, 1])
+    with col_scan:
+        do_scan = st.button("Scan", type="primary", use_container_width=True)
+    with col_refresh:
+        if st.button("Refresh data", use_container_width=True,
+                     help="Clear the 15-min cache and re-download"):
+            clear_caches()
+            st.session_state.pop("screener_results", None)
+            st.rerun()
 
-        with st.spinner("Scanning... this may take several minutes."):
+    if do_scan:
+        # tuple (hashable) for the cache key; None = full S&P 500
+        tickers = tuple(_TEST_TICKERS) if "Quick" in mode else None
+
+        with st.spinner("Scanning... this may take a few minutes (cached 15 min)."):
             try:
-                results = scan_sp500(tickers=tickers, include_failing=show_all)
+                results = cached_scan(tickers, show_all)
             except FileNotFoundError:
                 st.error(
                     "Model not found. Run **`make pipeline`** to train."

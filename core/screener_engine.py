@@ -36,7 +36,7 @@ from .config import (
 )
 from .data_service import (
     build_feature_row,
-    download_ohlcv,
+    download_ohlcv_batch,
     download_ohlcv_cached,
     get_sp500_tickers,
 )
@@ -397,7 +397,7 @@ def scan_sp500(
         ohlcv_data = download_ohlcv_cached(all_symbols)
     else:
         logger.info("Downloading OHLCV data for %d symbols (no cache)...", len(all_symbols))
-        ohlcv_data = download_ohlcv(all_symbols)
+        ohlcv_data = download_ohlcv_batch(all_symbols)
 
     # Extract market and VIX data, remove from scan pool.
     market_df = ohlcv_data.pop(SP500_MARKET_TICKER, None)

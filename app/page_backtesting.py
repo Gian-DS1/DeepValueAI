@@ -17,6 +17,7 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
+from data_cache import cached_backtest, clear_caches
 from theme import (
     COLORS,
     DIVERGENT_SCALE,
@@ -26,7 +27,6 @@ from theme import (
     section_title,
 )
 
-from core.backtesting_engine import run_backtest
 from core.data_service import get_sp500_tickers
 
 _TEST_TICKERS = ["AAPL", "MSFT", "GOOGL", "AMZN", "META", "NVDA", "JPM", "JNJ", "V", "PG"]
@@ -63,16 +63,26 @@ def render():
             "Initial capital ($)", value=100_000, step=10_000, min_value=10_000,
         )
 
-    if st.button("Run Backtest", type="primary"):
+    col_run, col_refresh = st.columns([4, 1])
+    with col_run:
+        do_run = st.button("Run Backtest", type="primary", use_container_width=True)
+    with col_refresh:
+        if st.button("Refresh data", use_container_width=True,
+                     help="Clear the 15-min cache and re-run"):
+            clear_caches()
+            st.session_state.pop("backtest_result", None)
+            st.rerun()
+
+    if do_run:
         tickers = _TEST_TICKERS if "Test" in mode else get_sp500_tickers()
 
-        with st.spinner("Running backtest... this may take several minutes."):
+        with st.spinner("Running backtest... this may take a few minutes (cached 15 min)."):
             try:
-                result = run_backtest(
-                    tickers=tickers,
-                    start_date=str(start_date),
-                    end_date=str(end_date),
-                    initial_capital=float(capital),
+                result = cached_backtest(
+                    tuple(tickers),
+                    str(start_date),
+                    str(end_date),
+                    float(capital),
                 )
             except FileNotFoundError:
                 st.error(

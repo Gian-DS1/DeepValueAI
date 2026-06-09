@@ -13,6 +13,7 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
+from data_cache import cached_download_ohlcv, cached_feature_row
 from plotly.subplots import make_subplots
 from theme import (
     COLORS,
@@ -23,7 +24,6 @@ from theme import (
 )
 
 from core.config import FEATURE_COLUMNS, PATHS
-from core.data_service import build_feature_row, download_ohlcv
 from core.prediction_service import generate_signal, load_model, load_threshold
 
 # ---------------------------------------------------------------------------
@@ -89,9 +89,9 @@ def _run_analysis(ticker: str, months_back: int):
         )
         return
 
-    # Download OHLCV
+    # Download OHLCV (cached 15 min — re-analyzing the same ticker is instant)
     with st.spinner(f"Downloading data for {ticker}..."):
-        data = download_ohlcv([ticker, "^GSPC"])
+        data = cached_download_ohlcv((ticker, "^GSPC"))
 
     if ticker not in data:
         st.error(f"Could not download data for **{ticker}**.")
@@ -99,9 +99,9 @@ def _run_analysis(ticker: str, months_back: int):
 
     market_df = data.get("^GSPC")
 
-    # Feature engineering
+    # Feature engineering (cached — skips the slow yfinance .info call on repeats)
     with st.spinner("Computing features..."):
-        df = build_feature_row(ticker, data[ticker], market_df=market_df)
+        df = cached_feature_row(ticker, data[ticker], market_df=market_df)
 
     if df.empty:
         st.error("Insufficient data to compute technical indicators.")
