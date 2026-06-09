@@ -548,13 +548,19 @@ def merge_fundamentals_pit(
     ]
     fund_slim = fund_df[[c for c in merge_cols if c in fund_df.columns]].copy()
     fund_slim["publish_date"] = (
-        pd.to_datetime(fund_slim["publish_date"], utc=True).dt.tz_localize(None)
+        pd.to_datetime(fund_slim["publish_date"], utc=True)
+        .dt.tz_localize(None)
+        .astype("datetime64[ns]")
     )
     fund_slim = fund_slim.dropna(subset=["publish_date"])
     fund_slim.drop_duplicates(["ticker", "publish_date"], keep="last", inplace=True)
 
     prices = prices_df.copy()
-    prices["date"] = pd.to_datetime(prices["date"], utc=True).dt.tz_localize(None)
+    prices["date"] = (
+        pd.to_datetime(prices["date"], utc=True)
+        .dt.tz_localize(None)
+        .astype("datetime64[ns]")
+    )
 
     # Merge per ticker to avoid pandas global-sort requirement
     parts: list[pd.DataFrame] = []
