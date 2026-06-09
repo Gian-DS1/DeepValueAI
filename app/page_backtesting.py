@@ -17,6 +17,14 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
+from theme import (
+    COLORS,
+    DIVERGENT_SCALE,
+    apply_plotly_theme,
+    metric_card,
+    metric_row,
+    section_title,
+)
 
 from core.backtesting_engine import run_backtest
 from core.data_service import get_sp500_tickers
@@ -29,10 +37,13 @@ _TEST_TICKERS = ["AAPL", "MSFT", "GOOGL", "AMZN", "META", "NVDA", "JPM", "JNJ", 
 # ---------------------------------------------------------------------------
 
 def render():
-    st.title("Backtesting")
     st.markdown(
-        "Simulates the DeepValue AI strategy on historical data and compares "
-        "against a passive S&P 500 buy-and-hold benchmark."
+        '<div class="dv-brand">'
+        '<div>'
+        '<div class="dv-title">Backtesting</div>'
+        '<div class="dv-tag">DeepValue AI strategy vs a passive S&P 500 buy-and-hold</div>'
+        '</div></div>',
+        unsafe_allow_html=True,
     )
 
     # --- Configuration ---
@@ -99,22 +110,32 @@ def _display_results(result):
 # Key metrics
 # ---------------------------------------------------------------------------
 
+def _signed_accent(val) -> str:
+    """Green for non-negative, red for negative — for return-like metrics."""
+    if val is None or (isinstance(val, float) and np.isnan(val)):
+        return COLORS["text_muted"]
+    return COLORS["positive"] if val >= 0 else COLORS["negative"]
+
+
 def _show_key_metrics(m: dict):
-    st.subheader("Summary")
+    section_title("Summary")
+
+    def fmt(val, spec):
+        return spec.format(val) if val is not None else "N/A"
 
     cards = [
-        ("Total Return", m.get("total_return"), "{:.2%}"),
-        ("Annualized Return", m.get("annualized_return"), "{:.2%}"),
-        ("Sharpe Ratio", m.get("sharpe_ratio"), "{:.2f}"),
-        ("Max Drawdown", m.get("max_drawdown"), "{:.2%}"),
-        ("Win Rate", m.get("win_rate"), "{:.1%}"),
-        ("Alpha vs S&P 500", m.get("alpha"), "{:.2%}"),
+        metric_card("Total Return", fmt(m.get("total_return"), "{:.2%}"),
+                    accent=_signed_accent(m.get("total_return"))),
+        metric_card("Annualized Return", fmt(m.get("annualized_return"), "{:.2%}"),
+                    accent=_signed_accent(m.get("annualized_return"))),
+        metric_card("Sharpe Ratio", fmt(m.get("sharpe_ratio"), "{:.2f}")),
+        metric_card("Max Drawdown", fmt(m.get("max_drawdown"), "{:.2%}"),
+                    accent=COLORS["negative"]),
+        metric_card("Win Rate", fmt(m.get("win_rate"), "{:.1%}")),
+        metric_card("Alpha vs S&P 500", fmt(m.get("alpha"), "{:.2%}"),
+                    accent=_signed_accent(m.get("alpha"))),
     ]
-
-    cols = st.columns(len(cards))
-    for col, (label, val, fmt) in zip(cols, cards, strict=True):
-        display = fmt.format(val) if val is not None else "N/A"
-        col.metric(label, display)
+    metric_row(cards, min_width=150)
 
 
 # ---------------------------------------------------------------------------
@@ -122,28 +143,30 @@ def _show_key_metrics(m: dict):
 # ---------------------------------------------------------------------------
 
 def _plot_equity_curve(result):
-    st.subheader("Equity Curve vs S&P 500")
+    section_title("Equity Curve vs S&P 500")
 
     fig = go.Figure()
+    # Strategy — solid line with a soft area fill for depth.
     fig.add_trace(go.Scatter(
         x=result.equity_curve.index,
         y=result.equity_curve.values,
         name="DeepValue AI",
-        line=dict(color="#2196F3", width=2),
+        line=dict(color=COLORS["positive"], width=2.4),
+        fill="tozeroy",
+        fillcolor="rgba(34,197,94,0.08)",
     ))
     fig.add_trace(go.Scatter(
         x=result.benchmark_curve.index,
         y=result.benchmark_curve.values,
         name="S&P 500 (Buy & Hold)",
-        line=dict(color="#FF9800", width=2, dash="dash"),
+        line=dict(color=COLORS["text_muted"], width=1.8, dash="dash"),
     ))
-    fig.update_layout(
-        xaxis_title="Date",
+    apply_plotly_theme(
+        fig,
+        xaxis_title=None,
         yaxis_title="Portfolio Value ($)",
         height=480,
-        template="plotly_white",
         legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01),
-        margin=dict(t=30, b=40),
         yaxis_tickprefix="$",
         yaxis_tickformat=",",
     )
@@ -155,7 +178,7 @@ def _plot_equity_curve(result):
 # ---------------------------------------------------------------------------
 
 def _plot_drawdown(equity_curve: pd.Series):
-    st.subheader("Drawdown")
+    section_title("Drawdown")
 
     peak = equity_curve.cummax()
     drawdown = (equity_curve - peak) / peak
@@ -166,16 +189,16 @@ def _plot_drawdown(equity_curve: pd.Series):
         y=drawdown.values,
         fill="tozeroy",
         name="Drawdown",
-        line=dict(color="#f44336", width=1),
-        fillcolor="rgba(244, 67, 54, 0.25)",
+        line=dict(color=COLORS["negative"], width=1.2),
+        fillcolor="rgba(239, 68, 68, 0.22)",
     ))
-    fig.update_layout(
-        xaxis_title="Date",
+    apply_plotly_theme(
+        fig,
+        xaxis_title=None,
         yaxis_title="Drawdown",
         height=300,
-        template="plotly_white",
         yaxis_tickformat=".1%",
-        margin=dict(t=20, b=40),
+        margin=dict(t=20, b=40, l=10, r=10),
     )
     st.plotly_chart(fig, use_container_width=True)
 
@@ -189,7 +212,7 @@ def _show_monthly_heatmap(metrics: dict):
     if not monthly_raw:
         return
 
-    st.subheader("Monthly Returns")
+    section_title("Monthly Returns")
 
     # Build a DataFrame with year x month
     records = []
@@ -207,26 +230,29 @@ def _show_monthly_heatmap(metrics: dict):
         "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
     ][:len(pivot.columns)]
 
-    # Color scale: red for negative, green for positive
+    # Divergent scale (red → neutral → green) from the shared theme; numeric
+    # labels in every cell so the chart is readable without relying on color.
     fig = go.Figure(data=go.Heatmap(
         z=pivot.values,
         x=pivot.columns.tolist(),
         y=[str(y) for y in pivot.index],
-        colorscale=[
-            [0.0, "#f44336"],
-            [0.5, "#ffffff"],
-            [1.0, "#4caf50"],
-        ],
+        colorscale=DIVERGENT_SCALE,
         zmid=0,
+        xgap=3, ygap=3,
         text=[[f"{v:.1%}" if pd.notna(v) else "" for v in row] for row in pivot.values],
         texttemplate="%{text}",
-        textfont=dict(size=11),
-        colorbar=dict(title="Return", tickformat=".0%"),
+        textfont=dict(size=11, color=COLORS["text"]),
+        colorbar=dict(
+            title="Return", tickformat=".0%",
+            outlinecolor=COLORS["border"], outlinewidth=1,
+            tickfont=dict(color=COLORS["text_muted"]),
+        ),
+        hovertemplate="%{y} %{x}: %{z:.2%}<extra></extra>",
     ))
-    fig.update_layout(
-        height=max(200, 60 * len(pivot)),
-        template="plotly_white",
-        margin=dict(t=20, b=30),
+    apply_plotly_theme(
+        fig,
+        height=max(220, 64 * len(pivot)),
+        margin=dict(t=20, b=30, l=10, r=10),
         yaxis=dict(autorange="reversed"),
     )
     st.plotly_chart(fig, use_container_width=True)
@@ -284,12 +310,17 @@ def _fmt_metric(val, kind: str) -> str:
 def _show_all_metrics(metrics: dict):
     with st.expander("All metrics (22 metrics, 5 tiers)"):
         for tier_name, items in _METRIC_TIERS.items():
-            st.markdown(f"**{tier_name}**")
-            tier_cols = st.columns(len(items))
-            for col, (key, label, kind) in zip(tier_cols, items, strict=True):
-                val = metrics.get(key)
-                col.metric(label, _fmt_metric(val, kind))
-            st.markdown("---")
+            st.markdown(
+                f'<div style="color:{COLORS["text_muted"]};font-size:0.74rem;'
+                'text-transform:uppercase;letter-spacing:0.07em;font-weight:600;'
+                'margin:4px 0 2px 0;">' + tier_name + "</div>",
+                unsafe_allow_html=True,
+            )
+            cards = [
+                metric_card(label, _fmt_metric(metrics.get(key), kind))
+                for key, label, kind in items
+            ]
+            metric_row(cards, min_width=150)
 
 
 # ---------------------------------------------------------------------------
@@ -305,7 +336,7 @@ _TRADE_FMT = {
 
 
 def _show_trade_log(trades: pd.DataFrame):
-    st.subheader("Trade Log")
+    section_title("Trade Log")
 
     if trades.empty:
         st.info("No trades were executed during this period.")
@@ -325,6 +356,7 @@ def _show_trade_log(trades: pd.DataFrame):
         trades[display_cols].style.format(fmt, na_rep="—"),
         use_container_width=True,
         height=400,
+        hide_index=True,
     )
 
     # Download

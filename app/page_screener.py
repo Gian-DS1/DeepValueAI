@@ -7,6 +7,7 @@ and displays a ranked table of investment opportunities with filters.
 
 import pandas as pd
 import streamlit as st
+from theme import COLORS, metric_card, metric_row, section_title
 
 from core.screener_engine import scan_sp500
 
@@ -18,10 +19,13 @@ _TEST_TICKERS = ["AAPL", "MSFT", "GOOGL", "AMZN", "META", "NVDA", "JPM", "JNJ", 
 # ---------------------------------------------------------------------------
 
 def render():
-    st.title("S&P 500 Screener")
     st.markdown(
-        "Scans the S&P 500 with the production model (34 features) "
-        "and displays opportunities ranked by probability."
+        '<div class="dv-brand">'
+        '<div>'
+        '<div class="dv-title">S&P 500 Screener</div>'
+        '<div class="dv-tag">Rank the index by model conviction (34 features)</div>'
+        '</div></div>',
+        unsafe_allow_html=True,
     )
 
     # --- Controls ---
@@ -94,9 +98,25 @@ _FORMAT_MAP = {
 
 
 def _display_results(df: pd.DataFrame):
-    # Summary
+    # KPI summary cards
     n_pass = int(df["passes_filters"].sum())
-    st.success(f"**{n_pass}** opportunities out of **{len(df)}** tickers analyzed.")
+    n_total = len(df)
+    avg_prob = df["probability"].mean() if "probability" in df.columns else float("nan")
+    top_prob = df["probability"].max() if "probability" in df.columns else float("nan")
+
+    metric_row(
+        [
+            metric_card("Opportunities", f"{n_pass}", sub=f"of {n_total} analyzed",
+                        accent=COLORS["positive"]),
+            metric_card("Tickers Analyzed", f"{n_total:,}"),
+            metric_card("Avg Buy Prob.", f"{avg_prob:.1%}" if pd.notna(avg_prob) else "N/A"),
+            metric_card("Top Buy Prob.", f"{top_prob:.1%}" if pd.notna(top_prob) else "N/A",
+                        accent=COLORS["primary"]),
+        ],
+        min_width=160,
+    )
+
+    section_title("Ranked Results")
 
     # Filter controls
     col_f1, col_f2 = st.columns(2)
@@ -130,7 +150,18 @@ def _display_results(df: pd.DataFrame):
     rename = {c: _COLUMN_LABELS.get(c, c) for c in display_df.columns}
     display_df = display_df.rename(columns=rename)
 
-    st.dataframe(display_df, use_container_width=True, height=600)
+    st.dataframe(
+        display_df,
+        use_container_width=True,
+        height=600,
+        hide_index=True,
+        column_config={
+            "Buy Prob.": st.column_config.TextColumn(
+                "Buy Prob.", help="Model probability the stock rises"),
+            "Passes": st.column_config.TextColumn(
+                "Passes", help="Meets quality + signal filters"),
+        },
+    )
 
     # Download button
     csv = filtered[available].to_csv(index=False).encode("utf-8")

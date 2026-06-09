@@ -14,6 +14,13 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 from plotly.subplots import make_subplots
+from theme import (
+    COLORS,
+    apply_plotly_theme,
+    metric_card,
+    metric_row,
+    section_title,
+)
 
 from core.config import FEATURE_COLUMNS, PATHS
 from core.data_service import build_feature_row, download_ohlcv
@@ -35,14 +42,17 @@ def _load_production_model():
 # ---------------------------------------------------------------------------
 
 def render():
-    st.title("Individual Analyzer")
     st.markdown(
-        "Enter an S&P 500 ticker to get the model prediction, "
-        "technical indicators, and fundamental metrics."
+        '<div class="dv-brand">'
+        '<div>'
+        '<div class="dv-title">Individual Analyzer</div>'
+        '<div class="dv-tag">Model prediction, technicals, and fundamentals for one ticker</div>'
+        '</div></div>',
+        unsafe_allow_html=True,
     )
 
     # --- Input ---
-    col_input, col_period = st.columns([2, 1])
+    col_input, col_period, col_btn = st.columns([2, 1, 1])
     with col_input:
         ticker = st.text_input(
             "Ticker", value="AAPL", max_chars=10,
@@ -54,8 +64,11 @@ def render():
             index=2,
             format_func=lambda m: f"{m} months",
         )
+    with col_btn:
+        st.markdown('<div style="height:1.75rem;"></div>', unsafe_allow_html=True)
+        analyze = st.button("Analyze", type="primary", use_container_width=True)
 
-    if st.button("Analyze", type="primary"):
+    if analyze:
         if not ticker:
             st.warning("Please enter a valid ticker.")
             return
@@ -116,42 +129,67 @@ def _run_analysis(ticker: str, months_back: int):
 # Signal card
 # ---------------------------------------------------------------------------
 
-_SIGNAL_COLORS = {"BUY": "#4caf50", "HOLD": "#9e9e9e"}
+_SIGNAL_STYLE = {
+    "BUY": (COLORS["positive"], "Model signals an opportunity"),
+    "HOLD": (COLORS["text_muted"], "No actionable signal"),
+}
 
 
 def _show_signal_card(signal_info: dict, threshold: float, df: pd.DataFrame, ticker: str):
     signal = signal_info["signal"]
     prob = signal_info["probability"]
     confidence = signal_info["confidence"]
-    color = _SIGNAL_COLORS.get(signal, "#9e9e9e")
+    color, blurb = _SIGNAL_STYLE.get(signal, (COLORS["text_muted"], ""))
 
     latest_close = df["Close"].iloc[-1]
     latest_sma = df["sma_200"].iloc[-1] if "sma_200" in df.columns else np.nan
 
+    # Hero banner — gradient wash keyed to the signal color.
     st.markdown(
         f"""
         <div style="
-            background-color: {color}20;
-            border-left: 6px solid {color};
-            padding: 1rem 1.5rem;
-            border-radius: 4px;
-            margin-bottom: 1rem;
+            position: relative;
+            background:
+                linear-gradient(135deg, {color}22 0%, transparent 60%),
+                {COLORS["surface"]};
+            border: 1px solid {COLORS["border"]};
+            border-left: 5px solid {color};
+            padding: 18px 22px;
+            border-radius: 16px;
+            margin-bottom: 14px;
+            display: flex; align-items: center; justify-content: space-between;
+            flex-wrap: wrap; gap: 12px;
         ">
-            <h2 style="margin:0; color:{color}">{ticker} — {signal}</h2>
+            <div>
+                <div style="font-size:0.75rem;letter-spacing:0.08em;text-transform:uppercase;
+                            color:{COLORS["text_muted"]};font-weight:600;">{ticker}</div>
+                <div style="font-size:2rem;font-weight:700;color:{color};line-height:1.1;
+                            margin-top:2px;">{signal}</div>
+                <div style="color:{COLORS["text_faint"]};font-size:0.85rem;
+                            margin-top:2px;">{blurb}</div>
+            </div>
+            <div class="dv-pill" style="border-color:{color}55;color:{color};
+                        background:{color}14;">
+                <span style="width:7px;height:7px;border-radius:50%;background:{color};
+                             display:inline-block;"></span>
+                {confidence} confidence
+            </div>
         </div>
         """,
         unsafe_allow_html=True,
     )
 
-    c1, c2, c3, c4, c5 = st.columns(5)
-    c1.metric("Probability", f"{prob:.1%}")
-    c2.metric("Confidence", confidence)
-    c3.metric("Threshold", f"{threshold:.1%}")
-    c4.metric("Close", f"${latest_close:,.2f}")
-    c5.metric(
-        "SMA 200",
-        f"${latest_sma:,.2f}" if pd.notna(latest_sma) else "N/A",
-    )
+    cards = [
+        metric_card("Probability", f"{prob:.1%}", accent=color),
+        metric_card("Confidence", confidence),
+        metric_card("Threshold", f"{threshold:.1%}"),
+        metric_card("Close", f"${latest_close:,.2f}"),
+        metric_card(
+            "SMA 200",
+            f"${latest_sma:,.2f}" if pd.notna(latest_sma) else "N/A",
+        ),
+    ]
+    metric_row(cards, min_width=140)
 
 
 # ---------------------------------------------------------------------------
@@ -159,26 +197,40 @@ def _show_signal_card(signal_info: dict, threshold: float, df: pd.DataFrame, tic
 # ---------------------------------------------------------------------------
 
 def _plot_price_chart(df: pd.DataFrame, ticker: str):
-    st.subheader("Price & SMA 200")
+    section_title("Price & SMA 200")
 
+    has_ohlc = all(c in df.columns for c in ("Open", "High", "Low"))
     fig = go.Figure()
-    fig.add_trace(go.Scatter(
-        x=df.index, y=df["Close"],
-        name="Price", line=dict(color="#2196F3", width=2),
-    ))
+
+    if has_ohlc:
+        # Candlesticks — the standard representation for OHLC trading data.
+        fig.add_trace(go.Candlestick(
+            x=df.index,
+            open=df["Open"], high=df["High"], low=df["Low"], close=df["Close"],
+            name=ticker,
+            increasing=dict(line=dict(color=COLORS["bull"]), fillcolor=COLORS["bull"]),
+            decreasing=dict(line=dict(color=COLORS["bear"]), fillcolor=COLORS["bear"]),
+        ))
+    else:
+        fig.add_trace(go.Scatter(
+            x=df.index, y=df["Close"],
+            name="Price", line=dict(color=COLORS["primary"], width=2),
+        ))
+
     if "sma_200" in df.columns:
         fig.add_trace(go.Scatter(
             x=df.index, y=df["sma_200"],
-            name="SMA 200", line=dict(color="#FF9800", width=1.5, dash="dash"),
+            name="SMA 200",
+            line=dict(color=COLORS["warning"], width=1.6, dash="dash"),
         ))
 
-    fig.update_layout(
-        xaxis_title="Date",
+    apply_plotly_theme(
+        fig,
+        xaxis_title=None,
         yaxis_title="Price ($)",
-        height=420,
-        template="plotly_white",
+        height=440,
+        xaxis_rangeslider_visible=False,
         legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01),
-        margin=dict(t=30, b=40),
     )
     st.plotly_chart(fig, use_container_width=True)
 
@@ -188,46 +240,52 @@ def _plot_price_chart(df: pd.DataFrame, ticker: str):
 # ---------------------------------------------------------------------------
 
 def _plot_technicals(df: pd.DataFrame):
-    st.subheader("Technical Indicators")
+    section_title("Technical Indicators")
 
     fig = make_subplots(
         rows=3, cols=1, shared_xaxes=True,
         subplot_titles=("RSI (14)", "Williams %R (14)", "MACD Histogram"),
-        vertical_spacing=0.08,
+        vertical_spacing=0.09,
     )
 
     # RSI
     fig.add_trace(
         go.Scatter(x=df.index, y=df["rsi"], name="RSI",
-                   line=dict(color="#2196F3")),
+                   line=dict(color=COLORS["primary"], width=1.6)),
         row=1, col=1,
     )
-    fig.add_hline(y=70, line_dash="dash", line_color="red", line_width=1, row=1, col=1)
-    fig.add_hline(y=30, line_dash="dash", line_color="green", line_width=1, row=1, col=1)
+    fig.add_hline(y=70, line_dash="dash", line_color=COLORS["negative"], line_width=1, row=1, col=1)
+    fig.add_hline(y=30, line_dash="dash", line_color=COLORS["positive"], line_width=1, row=1, col=1)
 
     # Williams %R
     fig.add_trace(
         go.Scatter(x=df.index, y=df["williams_r"], name="Williams %R",
-                   line=dict(color="#9C27B0")),
+                   line=dict(color=COLORS["purple"], width=1.6)),
         row=2, col=1,
     )
-    fig.add_hline(y=-80, line_dash="dash", line_color="green", line_width=1, row=2, col=1)
-    fig.add_hline(y=-20, line_dash="dash", line_color="red", line_width=1, row=2, col=1)
+    fig.add_hline(y=-80, line_dash="dash", line_color=COLORS["positive"],
+                  line_width=1, row=2, col=1)
+    fig.add_hline(y=-20, line_dash="dash", line_color=COLORS["negative"],
+                  line_width=1, row=2, col=1)
 
     # MACD Histogram
     macd_vals = df["macd_histogram"]
-    colors = ["#4caf50" if v >= 0 else "#f44336" for v in macd_vals]
+    colors = [COLORS["positive"] if v >= 0 else COLORS["negative"] for v in macd_vals]
     fig.add_trace(
         go.Bar(x=df.index, y=macd_vals, name="MACD Hist", marker_color=colors),
         row=3, col=1,
     )
 
-    fig.update_layout(
+    apply_plotly_theme(
+        fig,
         height=650,
-        template="plotly_white",
         showlegend=False,
-        margin=dict(t=40, b=30),
+        margin=dict(t=40, b=30, l=10, r=10),
     )
+    # Color the subplot titles to match the muted label style.
+    for ann in fig.layout.annotations:
+        ann.font.color = COLORS["text_muted"]
+        ann.font.size = 12
     st.plotly_chart(fig, use_container_width=True)
 
 
@@ -248,16 +306,15 @@ _FUND_LABELS = {
 
 
 def _show_fundamentals(df: pd.DataFrame):
-    st.subheader("Fundamental Metrics")
+    section_title("Fundamental Metrics")
 
     latest = df.iloc[-1]
-    cols = st.columns(4)
-
-    for i, (key, (label, fmt)) in enumerate(_FUND_LABELS.items()):
+    cards = []
+    for key, (label, fmt) in _FUND_LABELS.items():
         val = latest.get(key)
-        with cols[i % 4]:
-            display = (
-                (f"{val:.2%}" if fmt == "pct" else f"{val:.2f}")
-                if pd.notna(val) else "N/A"
-            )
-            st.metric(label, display)
+        display = (
+            (f"{val:.2%}" if fmt == "pct" else f"{val:.2f}")
+            if pd.notna(val) else "N/A"
+        )
+        cards.append(metric_card(label, display))
+    metric_row(cards, min_width=150)
