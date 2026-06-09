@@ -178,6 +178,23 @@ def get_simfin_tickers() -> list[str]:
 # OHLCV data download
 # ---------------------------------------------------------------------------
 
+def _normalize_ohlcv_index(df: pd.DataFrame) -> pd.DataFrame:
+    """Return *df* with a timezone-naive DatetimeIndex.
+
+    yfinance's two download paths disagree on timezone:
+        - yf.Ticker().history() -> tz-aware (America/New_York)
+        - yf.download()         -> tz-naive
+    Mixing the two (e.g. a batch-downloaded ticker with a per-ticker market
+    index) makes ``Index.reindex`` raise "Cannot compare dtypes". Stripping
+    tz to naive in BOTH paths guarantees every OHLCV frame is comparable.
+    """
+    idx = df.index
+    if isinstance(idx, pd.DatetimeIndex) and idx.tz is not None:
+        df = df.copy()
+        df.index = idx.tz_localize(None)
+    return df
+
+
 def download_ohlcv(
     tickers: list[str],
     period: str = DOWNLOAD_PERIOD,
@@ -270,7 +287,7 @@ def download_ohlcv(
                 failed.append(ticker)
                 continue
 
-            result[ticker] = df
+            result[ticker] = _normalize_ohlcv_index(df)
 
         except Exception as exc:
             # ----------------------------------------------------------
@@ -376,7 +393,7 @@ def download_ohlcv_batch(
             keep = [c for c in ohlcv_cols if c in df.columns]
             df = df[keep].dropna(subset=["Close"]).copy()
             if not df.empty:
-                result[ticker] = df
+                result[ticker] = _normalize_ohlcv_index(df)
         except Exception as exc:  # noqa: BLE001 - one bad ticker must not kill the batch
             logger.debug("Could not extract %s from batch: %s", ticker, exc)
 
@@ -446,13 +463,13 @@ def load_ohlcv_cache(tickers: list[str] | None = None) -> dict[str, pd.DataFrame
         for path in cache_dir.glob("*.parquet"):
             # Reverse sanitization (_GSPC -> ^GSPC)
             ticker = path.stem.replace("_", "^", 1) if path.stem.startswith("_") else path.stem
-            result[ticker] = pd.read_parquet(path)
+            result[ticker] = _normalize_ohlcv_index(pd.read_parquet(path))
     else:
         for ticker in tickers:
             safe_name = ticker.replace("^", "_").replace("/", "_")
             path = cache_dir / f"{safe_name}.parquet"
             if path.exists():
-                result[ticker] = pd.read_parquet(path)
+                result[ticker] = _normalize_ohlcv_index(pd.read_parquet(path))
 
     logger.info("Loaded %d tickers from OHLCV cache.", len(result))
     return result
@@ -557,6 +574,16 @@ def compute_technical_features(
         + 4 VIX features).
     """
     df = df.copy()
+
+    # Defensive: ensure the ticker, market, and VIX indices share the same
+    # timezone convention. Reindexing across a tz-aware and a tz-naive index
+    # raises "Cannot compare dtypes". Normalizing here makes this function
+    # robust no matter which download path produced each frame.
+    df = _normalize_ohlcv_index(df)
+    if market_df is not None:
+        market_df = _normalize_ohlcv_index(market_df)
+    if vix_df is not None:
+        vix_df = _normalize_ohlcv_index(vix_df)
 
     # --- 1. Williams %R (momentum oscillator) ---
     # Measures where today's close sits relative to the highest high
