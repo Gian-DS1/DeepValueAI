@@ -79,11 +79,20 @@ def _global_css() -> str:
         background-attachment: fixed;
     }}
 
-    /* Tighten the default top padding so the custom header sits high */
+    /* Leave room for Streamlit's fixed top toolbar (Share / Manage app /
+       deploy menu) so page titles aren't clipped behind it. On Cloud the
+       toolbar is ~3.5rem tall; a generous top padding keeps the first
+       heading fully visible on both Cloud and local. */
     .block-container {{
-        padding-top: 2.2rem;
+        padding-top: 4.5rem;
         padding-bottom: 3rem;
         max-width: 1280px;
+    }}
+
+    /* Make the native top header transparent so it blends with the dark
+       canvas instead of showing a light/opaque bar over the gradient. */
+    [data-testid="stHeader"] {{
+        background: transparent;
     }}
 
     /* ---- Headings ---- */
